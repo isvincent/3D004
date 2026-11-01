@@ -1,0 +1,1795 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>跨越畫框的古石橋 — 3D 互動場景</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap');
+        
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: 'Noto Sans TC', sans-serif;
+            user-select: none;
+        }
+        
+        .serif-title {
+            font-family: 'Noto Serif TC', serif;
+        }
+
+        /* 玻璃擬態面板 */
+        .glass-panel {
+            background: rgba(20, 18, 16, 0.72);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(212, 175, 55, 0.28);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .gold-btn {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid rgba(212, 175, 55, 0.25);
+        }
+        .gold-btn:hover {
+            background: rgba(212, 175, 55, 0.22);
+            border-color: rgba(212, 175, 55, 0.7);
+            transform: translateY(-1px);
+        }
+        .gold-btn.active {
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.45), rgba(160, 115, 25, 0.45));
+            border-color: #eab308;
+            color: #fef08a;
+            box-shadow: 0 0 15px rgba(212, 175, 55, 0.3);
+        }
+
+        /* 3D 熱點標記 */
+        .hotspot-marker {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            margin-left: -14px;
+            margin-top: -14px;
+            border-radius: 50%;
+            background: rgba(20, 18, 15, 0.85);
+            border: 2px solid #f59e0b;
+            color: #fde047;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            pointer-events: auto;
+            transition: transform 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.6);
+            z-index: 10;
+        }
+        .hotspot-marker::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 1.5px solid #f59e0b;
+            animation: pulse-ring 2s infinite;
+        }
+        .hotspot-marker:hover {
+            transform: scale(1.25);
+            background: #f59e0b;
+            color: #111;
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.9);
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(1); opacity: 0.9; }
+            100% { transform: scale(1.9); opacity: 0; }
+        }
+
+        /* 自訂捲軸 */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(212, 175, 55, 0.4); border-radius: 4px; }
+    </style>
+</head>
+<body class="text-stone-100">
+
+    <!-- 3D 畫布容器 -->
+    <div id="canvas-container" class="w-screen h-screen relative"></div>
+
+    <!-- 3D 導覽熱點圖層 -->
+    <div id="hotspots-layer" class="fixed inset-0 pointer-events-none overflow-hidden z-10"></div>
+
+    <!-- 左上標題與操作提示 -->
+    <div class="fixed top-4 left-4 z-20 pointer-events-none flex flex-col gap-2 max-w-md">
+        <div class="glass-panel px-5 py-3.5 rounded-2xl pointer-events-auto">
+            <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+                <span class="text-xs tracking-widest uppercase text-amber-300/90 font-semibold">3D Surreal Art Diorama</span>
+            </div>
+            <h1 class="serif-title text-xl md:text-2xl font-bold text-amber-50 mt-0.5 tracking-wide">跨越畫框的古石橋</h1>
+            <p class="text-xs text-stone-300/90 mt-1 leading-relaxed">
+                拖曳滑鼠可 360° 旋轉視角、滾輪縮放、右鍵平移。點擊場景中的發光標記或直接點擊 3D 物件可檢視藝術細節。
+            </p>
+        </div>
+    </div>
+
+    <!-- 右上控制面板收合按鈕 (手機與桌面通用) -->
+    <button id="toggle-ui-btn" class="fixed top-4 right-4 z-30 glass-panel px-3.5 py-2.5 rounded-xl text-amber-200 hover:text-white flex items-center gap-2 text-xs font-medium gold-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+        </svg>
+        <span id="toggle-ui-text">收合控制面板</span>
+    </button>
+
+    <!-- 右側互動控制面板 -->
+    <aside id="control-panel" class="fixed top-16 right-4 z-20 w-72 md:w-80 glass-panel rounded-2xl p-4 flex flex-col gap-4 max-h-[calc(100vh-5.5rem)] overflow-y-auto transition-all duration-300">
+        
+        <!-- 1. 視角快速切換 -->
+        <div>
+            <div class="flex items-center justify-between mb-2">
+                <h2 class="text-xs font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                    <span>🎥</span> 鏡頭視角切換
+                </h2>
+                <span class="text-[11px] text-stone-400">平滑運鏡</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <button data-cam="photo" class="cam-btn gold-btn active px-3 py-2 rounded-xl text-xs font-medium text-left flex items-center gap-2">
+                    <span>🖼️</span> 經典相片視角
+                </button>
+                <button data-cam="bridge" class="cam-btn gold-btn px-3 py-2 rounded-xl text-xs font-medium text-left flex items-center gap-2">
+                    <span>🌉</span> 漫步古橋視角
+                </button>
+                <button data-cam="painting" class="cam-btn gold-btn px-3 py-2 rounded-xl text-xs font-medium text-left flex items-center gap-2">
+                    <span>🏔️</span> 畫中世界視角
+                </button>
+                <button data-cam="room" class="cam-btn gold-btn px-3 py-2 rounded-xl text-xs font-medium text-left flex items-center gap-2">
+                    <span>🛋️</span> 客廳全景視角
+                </button>
+            </div>
+        </div>
+
+        <hr class="border-stone-700/60">
+
+        <!-- 2. 日夜與光影氛圍 -->
+        <div>
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-amber-300 mb-2 flex items-center gap-1.5">
+                <span>🌅</span> 光影與時辰模式
+            </h2>
+            <div class="grid grid-cols-3 gap-1.5">
+                <button data-light="sunset" class="light-btn gold-btn active py-2 px-2 rounded-xl text-xs font-medium text-center">
+                    黃昏暖陽
+                </button>
+                <button data-light="night" class="light-btn gold-btn py-2 px-2 rounded-xl text-xs font-medium text-center">
+                    星夜街燈
+                </button>
+                <button data-light="morning" class="light-btn gold-btn py-2 px-2 rounded-xl text-xs font-medium text-center">
+                    晨曦微光
+                </button>
+            </div>
+        </div>
+
+        <hr class="border-stone-700/60">
+
+        <!-- 3. 動態與環境特效開關 -->
+        <div class="flex flex-col gap-2.5">
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                <span>✨</span> 場景動態與細節控制
+            </h2>
+
+            <!-- 橋上旅人與雲霧動畫 -->
+            <label class="flex items-center justify-between cursor-pointer text-xs py-1">
+                <span class="text-stone-200 flex items-center gap-2">🚶 橋上旅人與山谷雲霧</span>
+                <input type="checkbox" id="toggle-anim" checked class="accent-amber-500 w-4 h-4 rounded cursor-pointer">
+            </label>
+
+            <!-- 穿界魔法金塵 -->
+            <label class="flex items-center justify-between cursor-pointer text-xs py-1">
+                <span class="text-stone-200 flex items-center gap-2">🪄 畫框穿界金塵粒子</span>
+                <input type="checkbox" id="toggle-particles" checked class="accent-amber-500 w-4 h-4 rounded cursor-pointer">
+            </label>
+
+            <!-- 復古街燈開關 -->
+            <label class="flex items-center justify-between cursor-pointer text-xs py-1">
+                <span class="text-stone-200 flex items-center gap-2">🏮 橋上復古街燈照明</span>
+                <input type="checkbox" id="toggle-lamps" checked class="accent-amber-500 w-4 h-4 rounded cursor-pointer">
+            </label>
+
+            <!-- 導覽熱點標記開關 -->
+            <label class="flex items-center justify-between cursor-pointer text-xs py-1">
+                <span class="text-stone-200 flex items-center gap-2">📍 顯示 3D 導覽熱點</span>
+                <input type="checkbox" id="toggle-hotspots" checked class="accent-amber-500 w-4 h-4 rounded cursor-pointer">
+            </label>
+        </div>
+
+        <hr class="border-stone-700/60">
+
+        <!-- 4. 畫中景深立體感滑桿 -->
+        <div>
+            <div class="flex justify-between text-xs mb-1">
+                <span class="text-amber-300 font-medium">🎨 畫中世界立體景深</span>
+                <span id="depth-val" class="text-stone-300">100%</span>
+            </div>
+            <input type="range" id="painting-depth-slider" min="20" max="150" value="100" class="w-full accent-amber-500 cursor-pointer h-1.5 bg-stone-700 rounded-lg">
+        </div>
+    </aside>
+
+    <!-- 底部導覽解說卡片 -->
+    <div id="info-card" class="fixed bottom-5 left-4 right-4 md:left-6 md:right-auto md:w-[26rem] z-20 glass-panel rounded-2xl p-4 transition-all duration-300 transform translate-y-0 opacity-100">
+        <div class="flex items-start justify-between gap-2">
+            <div>
+                <span id="info-tag" class="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    焦點導覽
+                </span>
+                <h3 id="info-title" class="serif-title text-lg font-bold text-amber-100 mt-1.5">
+                    跨越虛實的拱門古石橋
+                </h3>
+            </div>
+            <button id="close-info-btn" class="text-stone-400 hover:text-white p-1 rounded-lg">
+                ✕
+            </button>
+        </div>
+        <p id="info-desc" class="text-xs text-stone-200/90 mt-2 leading-relaxed">
+            這座多拱門中世紀鵝卵石古橋從巴洛克金框油畫的左下方直接破框而出，橋墩穩穩立於現代客廳的溫潤木地板上。橋面鋪設凹凸鵝卵石，兩側設有鑄鐵復古街燈與微型旅人，營造畫中世界與現實空間交融的超現實詩意。
+        </p>
+    </div>
+
+    <script>
+        window.onload = function () {
+            // ==========================================
+            // 1. 產生程序化材質貼圖 (Procedural Canvas Textures)
+            // ==========================================
+            
+            // (A) 洞石牆面貼圖 (Travertine Limestone Wall)
+            function createTravertineTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1024;
+                canvas.height = 1024;
+                const ctx = canvas.getContext('2d');
+
+                // 基底米灰暖石色
+                ctx.fillStyle = '#c8bca8';
+                ctx.fillRect(0, 0, 1024, 1024);
+
+                // 水平沉積岩層次紋理
+                for (let y = 0; y < 1024; y += 2) {
+                    const wave = Math.sin(y * 0.03) * 8 + (Math.random() - 0.5) * 10;
+                    const shade = 190 + Math.floor(wave);
+                    ctx.fillStyle = `rgb(${shade}, ${shade - 12}, ${shade - 28})`;
+                    ctx.fillRect(0, y, 1024, 2);
+                }
+
+                // 洞石特有的天然水平孔隙 (Pores)
+                for (let i = 0; i < 1800; i++) {
+                    const x = Math.random() * 1024;
+                    const y = Math.random() * 1024;
+                    const w = 4 + Math.random() * 28;
+                    const h = 1 + Math.random() * 3.5;
+                    ctx.fillStyle = Math.random() > 0.3 ? 'rgba(75, 62, 48, 0.38)' : 'rgba(235, 228, 215, 0.3)';
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 大理石磚分割縫隙
+                ctx.strokeStyle = 'rgba(85, 72, 58, 0.45)';
+                ctx.lineWidth = 2;
+                const rows = 8;
+                const cols = 4;
+                const rowH = 1024 / rows;
+                const colW = 1024 / cols;
+
+                for (let r = 0; r <= rows; r++) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, r * rowH);
+                    ctx.lineTo(1024, r * rowH);
+                    ctx.stroke();
+                }
+                for (let r = 0; r < rows; r++) {
+                    const offset = (r % 2) * (colW / 2);
+                    for (let c = 0; c <= cols; c++) {
+                        const x = (c * colW + offset) % 1024;
+                        ctx.beginPath();
+                        ctx.moveTo(x, r * rowH);
+                        ctx.lineTo(x, (r + 1) * rowH);
+                        ctx.stroke();
+                    }
+                }
+
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.repeat.set(2.5, 1.4);
+                return tex;
+            }
+
+            // (B) 溫潤木地板貼圖 (Warm Wood Plank Flooring)
+            function createWoodFloorTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1024;
+                canvas.height = 1024;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = '#8d6239';
+                ctx.fillRect(0, 0, 1024, 1024);
+
+                const planks = 12;
+                const plankH = 1024 / planks;
+
+                for (let p = 0; p < planks; p++) {
+                    const y = p * plankH;
+                    const baseR = 135 + (Math.random() - 0.5) * 20;
+                    const baseG = 92 + (Math.random() - 0.5) * 16;
+                    const baseB = 52 + (Math.random() - 0.5) * 12;
+                    ctx.fillStyle = `rgb(${baseR}, ${baseG}, ${baseB})`;
+                    ctx.fillRect(0, y, 1024, plankH);
+
+                    // 木紋纖維
+                    for (let i = 0; i < 45; i++) {
+                        ctx.strokeStyle = `rgba(60, 35, 15, ${0.06 + Math.random() * 0.08})`;
+                        ctx.lineWidth = 1 + Math.random() * 2;
+                        ctx.beginPath();
+                        const wy = y + Math.random() * plankH;
+                        ctx.moveTo(0, wy);
+                        ctx.bezierCurveTo(340, wy + (Math.random() - 0.5) * 12, 680, wy + (Math.random() - 0.5) * 12, 1024, wy);
+                        ctx.stroke();
+                    }
+
+                    // 地板接縫
+                    ctx.strokeStyle = 'rgba(40, 22, 10, 0.65)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(1024, y);
+                    ctx.stroke();
+
+                    // 垂直短接縫
+                    const splitX = ((p * 370) + 180) % 900 + 60;
+                    ctx.beginPath();
+                    ctx.moveTo(splitX, y);
+                    ctx.lineTo(splitX, y + plankH);
+                    ctx.stroke();
+                }
+
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.repeat.set(3, 3);
+                return tex;
+            }
+
+            // (C) 波斯復古雕花地毯貼圖 (Ornate Vintage Rug)
+            function createRugTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1024;
+                canvas.height = 768;
+                const ctx = canvas.getContext('2d');
+
+                // 米白復古底色
+                ctx.fillStyle = '#dfd5c3';
+                ctx.fillRect(0, 0, 1024, 768);
+
+                // 外框與多層古典邊框
+                const borders = [
+                    { pad: 24, color: '#6b4c3b', width: 8 },
+                    { pad: 44, color: '#9c7a54', width: 22 },
+                    { pad: 70, color: '#4a3528', width: 5 },
+                    { pad: 86, color: '#b59978', width: 14 }
+                ];
+                borders.forEach(b => {
+                    ctx.strokeStyle = b.color;
+                    ctx.lineWidth = b.width;
+                    ctx.strokeRect(b.pad, b.pad, 1024 - b.pad * 2, 768 - b.pad * 2);
+                });
+
+                // 幾何古典圖騰與藤蔓對稱花紋
+                ctx.save();
+                ctx.translate(512, 384);
+                for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+                    ctx.save();
+                    ctx.rotate(angle);
+                    ctx.fillStyle = 'rgba(105, 72, 52, 0.55)';
+                    ctx.beginPath();
+                    ctx.ellipse(0, 140, 22, 65, 0, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = 'rgba(155, 115, 78, 0.5)';
+                    ctx.beginPath();
+                    ctx.arc(0, 210, 14, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // 中心徽章
+                ctx.fillStyle = '#73513d';
+                ctx.beginPath();
+                ctx.arc(0, 0, 75, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#dfd5c3';
+                ctx.beginPath();
+                ctx.arc(0, 0, 48, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                // 散落古典花卉斑點模擬織紋
+                for (let x = 110; x < 914; x += 48) {
+                    for (let y = 110; y < 658; y += 48) {
+                        ctx.fillStyle = ((x + y) % 96 === 0) ? 'rgba(95, 68, 50, 0.42)' : 'rgba(145, 112, 82, 0.35)';
+                        ctx.beginPath();
+                        ctx.arc(x, y, 8, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                // 織物顆粒感
+                for (let i = 0; i < 8000; i++) {
+                    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(60,40,25,0.06)';
+                    ctx.fillRect(Math.random() * 1024, Math.random() * 768, 2, 2);
+                }
+
+                return new THREE.CanvasTexture(canvas);
+            }
+
+            // (D) 古石橋砌石與鵝卵石貼圖 (Cobblestone & Masonry Texture)
+            function createStoneBridgeTexture(isRoad = false) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = isRoad ? '#555049' : '#8a8275';
+                ctx.fillRect(0, 0, 512, 512);
+
+                const rows = isRoad ? 18 : 10;
+                const cols = isRoad ? 14 : 6;
+                const rh = 512 / rows;
+                const cw = 512 / cols;
+
+                for (let r = 0; r < rows; r++) {
+                    const offset = (r % 2) * (cw * 0.5);
+                    for (let c = -1; c <= cols; c++) {
+                        const x = c * cw + offset + (Math.random() - 0.5) * 3;
+                        const y = r * rh + (Math.random() - 0.5) * 2;
+                        const tone = (isRoad ? 115 : 145) + (Math.random() - 0.5) * 38;
+                        ctx.fillStyle = `rgb(${tone}, ${tone - 6}, ${tone - 14})`;
+
+                        if (isRoad) {
+                            // 圓潤立體鵝卵石
+                            ctx.beginPath();
+                            ctx.roundRect(x + 2, y + 2, cw - 4, rh - 4, 6);
+                            ctx.fill();
+                        } else {
+                            // 橋身方形石塊
+                            ctx.fillRect(x + 1.5, y + 1.5, cw - 3, rh - 3);
+                        }
+                    }
+                }
+
+                // 風化青苔與陰影斑駁感
+                for (let i = 0; i < 1200; i++) {
+                    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(40, 38, 32, 0.14)' : 'rgba(210, 200, 185, 0.1)';
+                    ctx.fillRect(Math.random() * 512, Math.random() * 512, 3, 3);
+                }
+
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            }
+
+            // (E) 畫中壯麗夕陽雲彩與遠山背景貼圖 (Painting Sky & Distant Valley Backdrop)
+            function createPaintingSkyTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1024;
+                canvas.height = 640;
+                const ctx = canvas.getContext('2d');
+
+                // 夕陽漸層天空
+                const skyGrad = ctx.createLinearGradient(0, 0, 0, 420);
+                skyGrad.addColorStop(0, '#3a4b5e');
+                skyGrad.addColorStop(0.35, '#8c6f5a');
+                skyGrad.addColorStop(0.7, '#dfa86b');
+                skyGrad.addColorStop(1, '#f7d294');
+                ctx.fillStyle = skyGrad;
+                ctx.fillRect(0, 0, 1024, 640);
+
+                // 夕陽雲彩層次
+                for (let i = 0; i < 65; i++) {
+                    const cx = Math.random() * 1024;
+                    const cy = 30 + Math.random() * 230;
+                    const rx = 50 + Math.random() * 130;
+                    const ry = 12 + Math.random() * 32;
+                    const grad = ctx.createRadialGradient(cx, cy, 5, cx, cy, rx);
+                    grad.addColorStop(0, 'rgba(255, 210, 145, 0.35)');
+                    grad.addColorStop(0.5, 'rgba(130, 95, 75, 0.25)');
+                    grad.addColorStop(1, 'rgba(70, 60, 65, 0)');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 遠方霧氣山脈剪影
+                ctx.fillStyle = '#6c686b';
+                ctx.beginPath();
+                ctx.moveTo(0, 420);
+                const pts = [0, 310, 140, 250, 260, 140, 380, 290, 520, 330, 660, 230, 790, 280, 910, 170, 1024, 240];
+                for (let i = 0; i < pts.length; i += 2) {
+                    ctx.lineTo(pts[i], pts[i + 1]);
+                }
+                ctx.lineTo(1024, 640);
+                ctx.lineTo(0, 640);
+                ctx.fill();
+
+                // 峽谷草坡底色與蜿蜒金色溪流
+                const valleyGrad = ctx.createLinearGradient(0, 360, 0, 640);
+                valleyGrad.addColorStop(0, '#5d634a');
+                valleyGrad.addColorStop(0.5, '#3d4a2d');
+                valleyGrad.addColorStop(1, '#1e2b18');
+                ctx.fillStyle = valleyGrad;
+                ctx.fillRect(0, 370, 1024, 270);
+
+                // 蜿蜒河流倒映夕陽
+                ctx.strokeStyle = '#d4cbb8';
+                ctx.lineWidth = 28;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(540, 380);
+                ctx.bezierCurveTo(490, 430, 630, 480, 550, 540);
+                ctx.bezierCurveTo(500, 580, 620, 610, 650, 640);
+                ctx.stroke();
+
+                return new THREE.CanvasTexture(canvas);
+            }
+
+            // ==========================================
+            // 2. 初始化 Three.js 場景、相機與渲染器
+            // ==========================================
+            const container = document.getElementById('canvas-container');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1b1917);
+            scene.fog = new THREE.FogExp2(0x28231e, 0.012);
+
+            const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 200);
+            // 預設「經典相片視角」完美對齊原圖構圖
+            camera.position.set(-1.3, 1.85, 11.2);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.1;
+            container.appendChild(renderer.domElement);
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.set(-0.3, 1.6, 0.5);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.06;
+            controls.maxPolarAngle = Math.PI / 2 - 0.02; // 防止穿入地板下
+            controls.minDistance = 2.5;
+            controls.maxDistance = 24;
+            controls.update();
+
+            // 載入程序化貼圖
+            const travertineTex = createTravertineTexture();
+            const woodFloorTex = createWoodFloorTexture();
+            const rugTex = createRugTexture();
+            const stoneWallTex = createStoneBridgeTexture(false);
+            stoneWallTex.repeat.set(4, 2);
+            const cobbleRoadTex = createStoneBridgeTexture(true);
+            cobbleRoadTex.repeat.set(2, 10);
+            const paintingSkyTex = createPaintingSkyTexture();
+
+            // 儲存可點擊的互動群組
+            const interactableObjects = [];
+            function registerInteractable(meshOrGroup, infoKey) {
+                meshOrGroup.traverse(child => {
+                    if (child.isMesh) {
+                        child.userData.infoKey = infoKey;
+                        interactableObjects.push(child);
+                    }
+                });
+            }
+
+            // ==========================================
+            // 3. 建立現代客廳建築結構 (Room & Windows)
+            // ==========================================
+            const roomGroup = new THREE.Group();
+            scene.add(roomGroup);
+
+            // 木地板
+            const floorMat = new THREE.MeshStandardMaterial({
+                map: woodFloorTex,
+                roughness: 0.55,
+                metalness: 0.05
+            });
+            const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(26, 22), floorMat);
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.receiveShadow = true;
+            roomGroup.add(floorMesh);
+
+            // 後方洞石主牆 (Travertine Wall)
+            const wallMat = new THREE.MeshStandardMaterial({
+                map: travertineTex,
+                roughness: 0.75,
+                bumpMap: travertineTex,
+                bumpScale: 0.03
+            });
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(16.5, 9.5, 0.4), wallMat);
+            backWall.position.set(0, 4.75, -3.2);
+            backWall.receiveShadow = true;
+            roomGroup.add(backWall);
+
+            // 復古波斯地毯
+            const rugMat = new THREE.MeshStandardMaterial({
+                map: rugTex,
+                roughness: 0.9
+            });
+            const rugMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 5.2), rugMat);
+            rugMesh.rotation.x = -Math.PI / 2;
+            rugMesh.position.set(1.8, 0.015, 2.5);
+            rugMesh.receiveShadow = true;
+            roomGroup.add(rugMesh);
+
+            // 左側大型現代落地窗與窗外城市綠意景觀
+            const windowGroup = new THREE.Group();
+            const darkFrameMat = new THREE.MeshStandardMaterial({ color: 0x262626, roughness: 0.4, metalness: 0.6 });
+            const glassMat = new THREE.MeshPhysicalMaterial({
+                color: 0xdff2ff,
+                transparent: true,
+                opacity: 0.18,
+                roughness: 0.1,
+                transmission: 0.8
+            });
+
+            // 左側落地窗金屬窗框結構
+            const leftWinZPositions = [-3.0, 0.2, 3.4, 6.6];
+            leftWinZPositions.forEach(zPos => {
+                const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.14, 9.5, 0.14), darkFrameMat);
+                mullion.position.set(-7.6, 4.75, zPos);
+                windowGroup.add(mullion);
+            });
+            [0.1, 6.2, 9.3].forEach(yPos => {
+                const transom = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 10.5), darkFrameMat);
+                transom.position.set(-7.6, yPos, 1.8);
+                windowGroup.add(transom);
+            });
+            const leftGlass = new THREE.Mesh(new THREE.PlaneGeometry(10.2, 9.2), glassMat);
+            leftGlass.rotation.y = Math.PI / 2;
+            leftGlass.position.set(-7.6, 4.6, 1.8);
+            windowGroup.add(leftGlass);
+
+            // 左側窗台矮牆與立柱
+            const leftPillar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 9.5, 1.2), new THREE.MeshStandardMaterial({ color: 0xdcd6cd, roughness: 0.8 }));
+            leftPillar.position.set(-7.3, 4.75, -2.8);
+            leftPillar.receiveShadow = true;
+            windowGroup.add(leftPillar);
+
+            // 右側窗戶與窗框
+            const rightMullion1 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 9.5, 0.14), darkFrameMat);
+            rightMullion1.position.set(8.2, 4.75, -3.0);
+            const rightMullion2 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 9.5, 0.14), darkFrameMat);
+            rightMullion2.position.set(10.8, 4.75, -3.0);
+            const rightTransom = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.14, 0.14), darkFrameMat);
+            rightTransom.position.set(9.5, 6.8, -3.0);
+            windowGroup.add(rightMullion1, rightMullion2, rightTransom);
+
+            // 窗外城市大樓與綠樹群 (Outside Cityscape & Lush Trees)
+            const cityGroup = new THREE.Group();
+            const buildingColors = [0xcbc6be, 0xa8b3bd, 0xd8cfc4, 0x9aa5b1];
+            for (let i = 0; i < 14; i++) {
+                const bw = 1.6 + Math.random() * 2.2;
+                const bh = 4 + Math.random() * 9;
+                const bd = 1.6 + Math.random() * 2.2;
+                const bMat = new THREE.MeshStandardMaterial({
+                    color: buildingColors[i % buildingColors.length],
+                    roughness: 0.7
+                });
+                const bldg = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), bMat);
+                if (i < 10) {
+                    bldg.position.set(-12 - Math.random() * 8, bh / 2 - 1, -4 + i * 1.4);
+                } else {
+                    bldg.position.set(10 + (i - 10) * 2.2, bh / 2 - 1, -7 - Math.random() * 4);
+                }
+                cityGroup.add(bldg);
+            }
+
+            // 窗外茂密綠樹冠
+            const foliageMat1 = new THREE.MeshStandardMaterial({ color: 0x4d7c38, roughness: 0.85 });
+            const foliageMat2 = new THREE.MeshStandardMaterial({ color: 0x659946, roughness: 0.85 });
+            for (let i = 0; i < 28; i++) {
+                const radius = 0.8 + Math.random() * 1.2;
+                const lushSphere = new THREE.Mesh(
+                    new THREE.DodecahedronGeometry(radius, 1),
+                    i % 2 === 0 ? foliageMat1 : foliageMat2
+                );
+                if (i < 20) {
+                    lushSphere.position.set(-9.5 - Math.random() * 3, 0.5 + Math.random() * 2.8, -2.5 + i * 0.55);
+                } else {
+                    lushSphere.position.set(9.2 + Math.random() * 2.5, 1.0 + Math.random() * 2.6, -5.0 - Math.random() * 1.5);
+                }
+                cityGroup.add(lushSphere);
+            }
+            windowGroup.add(cityGroup);
+            roomGroup.add(windowGroup);
+            registerInteractable(windowGroup, 'window');
+
+            // ==========================================
+            // 4. 巴洛克雕花金框與立體畫中世界 (Ornate Golden Frame & 3D Painting Diorama)
+            // ==========================================
+            const paintingMasterGroup = new THREE.Group();
+            paintingMasterGroup.position.set(-0.35, 4.45, -2.95);
+            scene.add(paintingMasterGroup);
+
+            const frameW = 9.4;
+            const frameH = 5.7;
+            const goldMat = new THREE.MeshStandardMaterial({
+                color: 0xd4a63a,
+                metalness: 0.78,
+                roughness: 0.28
+            });
+            const darkGoldMat = new THREE.MeshStandardMaterial({
+                color: 0x9c721c,
+                metalness: 0.7,
+                roughness: 0.38
+            });
+
+            const frameGroup = new THREE.Group();
+            paintingMasterGroup.add(frameGroup);
+
+            // 多層次古典巴洛克金框線條
+            function createMoldingBar(length, isHorizontal, yOrXSign) {
+                const barGroup = new THREE.Group();
+                const outer = new THREE.Mesh(new THREE.BoxGeometry(isHorizontal ? length : 0.42, isHorizontal ? 0.42 : length, 0.28), goldMat);
+                const inner = new THREE.Mesh(new THREE.BoxGeometry(isHorizontal ? length - 0.35 : 0.22, isHorizontal ? 0.22 : length - 0.35, 0.36), darkGoldMat);
+                const bead = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, length, 16), goldMat);
+                if (isHorizontal) bead.rotation.z = Math.PI / 2;
+                bead.position.z = 0.14;
+                barGroup.add(outer, inner, bead);
+
+                // 巴洛克浮雕裝飾細節
+                const count = Math.floor(length / 0.55);
+                for (let i = -count / 2; i <= count / 2; i++) {
+                    const ornament = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 1), goldMat);
+                    ornament.scale.set(1.2, 0.7, 0.6);
+                    if (isHorizontal) {
+                        ornament.position.set(i * 0.5, yOrXSign * 0.06, 0.18);
+                    } else {
+                        ornament.position.set(yOrXSign * 0.06, i * 0.5, 0.18);
+                    }
+                    barGroup.add(ornament);
+                }
+                return barGroup;
+            }
+
+            const topFrame = createMoldingBar(frameW + 0.45, true, 1);
+            topFrame.position.set(0, frameH / 2, 0.15);
+            const bottomFrame = createMoldingBar(frameW + 0.45, true, -1);
+            bottomFrame.position.set(0, -frameH / 2, 0.15);
+            const leftFrame = createMoldingBar(frameH + 0.45, false, -1);
+            leftFrame.position.set(-frameW / 2, 0, 0.15);
+            const rightFrame = createMoldingBar(frameH + 0.45, false, 1);
+            rightFrame.position.set(frameW / 2, 0, 0.15);
+            frameGroup.add(topFrame, bottomFrame, leftFrame, rightFrame);
+
+            // 四角與頂部中央華麗巴洛克雕花徽飾 (Corner & Crest Filigree)
+            const cornerPositions = [
+                [-frameW / 2, frameH / 2],
+                [frameW / 2, frameH / 2],
+                [-frameW / 2, -frameH / 2],
+                [frameW / 2, -frameH / 2]
+            ];
+            cornerPositions.forEach(([cx, cy]) => {
+                const rosette = new THREE.Mesh(new THREE.TorusKnotGeometry(0.22, 0.065, 48, 8, 2, 3), goldMat);
+                rosette.position.set(cx, cy, 0.25);
+                rosette.castShadow = true;
+                frameGroup.add(rosette);
+            });
+            // 頂部中央皇冠雕花
+            const topCrest = new THREE.Mesh(new THREE.TorusKnotGeometry(0.26, 0.06, 64, 8, 3, 4), goldMat);
+            topCrest.scale.set(2.2, 0.85, 0.5);
+            topCrest.position.set(0, frameH / 2 + 0.08, 0.26);
+            frameGroup.add(topCrest);
+
+            // --- 畫中立體微縮世界 (3D Diorama Inside Painting) ---
+            const dioramaGroup = new THREE.Group();
+            paintingMasterGroup.add(dioramaGroup);
+
+            // 畫布天空與遠景底圖
+            const skyBackdrop = new THREE.Mesh(
+                new THREE.PlaneGeometry(frameW - 0.3, frameH - 0.3),
+                new THREE.MeshBasicMaterial({ map: paintingSkyTex })
+            );
+            skyBackdrop.position.set(0, 0, -1.5);
+            dioramaGroup.add(skyBackdrop);
+
+            // 畫框內側遮罩盒 (深邃立體畫盒)
+            const boxWallMat = new THREE.MeshBasicMaterial({ color: 0x241d17, side: THREE.BackSide });
+            const shadowBox = new THREE.Mesh(new THREE.BoxGeometry(frameW - 0.3, frameH - 0.3, 1.6), boxWallMat);
+            shadowBox.position.set(0, 0, -0.75);
+            dioramaGroup.add(shadowBox);
+
+            // 畫中 3D 崇山峻嶺 (左側與右側陡峭山峰)
+            const mountainMatLeft = new THREE.MeshStandardMaterial({ color: 0x5c5349, roughness: 0.88, flatShading: true });
+            const mountainMatRight = new THREE.MeshStandardMaterial({ color: 0x453d36, roughness: 0.9, flatShading: true });
+
+            const peaksData = [
+                { x: -2.2, y: 0.55, z: -1.15, r: 1.45, h: 3.1, mat: mountainMatLeft },
+                { x: -3.3, y: 0.25, z: -1.0, r: 1.3, h: 2.6, mat: mountainMatLeft },
+                { x: -1.1, y: 0.1, z: -1.25, r: 1.1, h: 2.2, mat: mountainMatLeft },
+                { x: 3.5, y: 0.4, z: -1.05, r: 1.35, h: 2.9, mat: mountainMatRight },
+                { x: 2.5, y: -0.1, z: -1.2, r: 1.1, h: 2.1, mat: mountainMatRight }
+            ];
+            peaksData.forEach(p => {
+                const cone = new THREE.Mesh(new THREE.ConeGeometry(p.r, p.h, 7), p.mat);
+                cone.position.set(p.x, p.y, p.z);
+                cone.rotation.y = Math.random() * Math.PI;
+                dioramaGroup.add(cone);
+            });
+
+            // 畫中左右兩側山坡與針葉松林
+            const cliffLeft = new THREE.Mesh(new THREE.DodecahedronGeometry(1.75, 1), new THREE.MeshStandardMaterial({ color: 0x3b4429, roughness: 0.9, flatShading: true }));
+            cliffLeft.scale.set(1.3, 0.85, 0.6);
+            cliffLeft.position.set(-2.9, -1.65, -0.55);
+            dioramaGroup.add(cliffLeft);
+
+            const cliffRight = new THREE.Mesh(new THREE.DodecahedronGeometry(1.65, 1), new THREE.MeshStandardMaterial({ color: 0x343d23, roughness: 0.9, flatShading: true }));
+            cliffRight.scale.set(1.25, 0.9, 0.6);
+            cliffRight.position.set(2.9, -1.7, -0.55);
+            dioramaGroup.add(cliffRight);
+
+            // 畫中松樹群函式
+            function createPineTree(scale = 1) {
+                const tree = new THREE.Group();
+                const trunk = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.03 * scale, 0.05 * scale, 0.35 * scale, 6),
+                    new THREE.MeshStandardMaterial({ color: 0x3d2817 })
+                );
+                trunk.position.y = 0.15 * scale;
+                tree.add(trunk);
+
+                const pineMat = new THREE.MeshStandardMaterial({ color: 0x24381a, roughness: 0.85, flatShading: true });
+                for (let i = 0; i < 3; i++) {
+                    const layer = new THREE.Mesh(
+                        new THREE.ConeGeometry((0.22 - i * 0.05) * scale, 0.38 * scale, 7),
+                        pineMat
+                    );
+                    layer.position.y = (0.32 + i * 0.2) * scale;
+                    tree.add(layer);
+                }
+                return tree;
+            }
+
+            const treeCoords = [
+                [-3.9, -1.1, -0.35, 1.8], [-3.5, -1.2, -0.4, 2.1], [-2.9, -1.3, -0.45, 1.4],
+                [-2.3, -1.45, -0.5, 1.2], [3.6, -1.2, -0.4, 1.7], [3.1, -1.4, -0.45, 1.4],
+                [2.4, -1.6, -0.5, 1.1]
+            ];
+            treeCoords.forEach(([tx, ty, tz, ts]) => {
+                const pine = createPineTree(ts);
+                pine.position.set(tx, ty, tz);
+                dioramaGroup.add(pine);
+            });
+
+            // 畫中橫跨峽谷的壯麗三拱巨石橋 (Grand Arch Bridge inside Painting)
+            const innerBridgeGroup = new THREE.Group();
+            const innerStoneMat = new THREE.MeshStandardMaterial({
+                map: stoneWallTex,
+                color: 0x9e9280,
+                roughness: 0.82
+            });
+
+            // 左主橋墩與右主橋墩
+            const leftPier = new THREE.Mesh(new THREE.BoxGeometry(0.62, 2.35, 0.45), innerStoneMat);
+            leftPier.position.set(-1.55, -1.05, -0.55);
+            const rightPier = new THREE.Mesh(new THREE.BoxGeometry(0.62, 2.35, 0.45), innerStoneMat);
+            rightPier.position.set(1.75, -1.05, -0.55);
+            innerBridgeGroup.add(leftPier, rightPier);
+
+            // 中央巨型圓拱與左右副拱
+            const centerArch = new THREE.Mesh(
+                new THREE.RingGeometry(1.42, 1.72, 32, 1, 0, Math.PI),
+                new THREE.MeshStandardMaterial({ map: stoneWallTex, color: 0xa89b88, side: THREE.DoubleSide })
+            );
+            centerArch.position.set(0.1, -0.95, -0.32);
+            innerBridgeGroup.add(centerArch);
+
+            // 畫中拱頂石徽章 (Keystone)
+            const keystone = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.34, 0.52), innerStoneMat);
+            keystone.position.set(0.1, 0.65, -0.52);
+            innerBridgeGroup.add(keystone);
+
+            // 畫中上層拱橋弧形橋面
+            const archRoadCurve = new THREE.CatmullRomCurve3([
+                new THREE.Vector3(-3.6, -0.18, -0.6),
+                new THREE.Vector3(-1.55, 0.25, -0.55),
+                new THREE.Vector3(0.1, 0.72, -0.52),
+                new THREE.Vector3(1.75, 0.25, -0.55),
+                new THREE.Vector3(3.9, -0.22, -0.6)
+            ]);
+            const archDeckGeo = new THREE.TubeGeometry(archRoadCurve, 36, 0.22, 8, false);
+            const archDeck = new THREE.Mesh(archDeckGeo, innerStoneMat);
+            archDeck.scale.set(1, 0.65, 1.3);
+            innerBridgeGroup.add(archDeck);
+
+            dioramaGroup.add(innerBridgeGroup);
+
+            // 畫中山谷漂浮雲霧層 (Animated Mountain Mist)
+            const mistPlanes = [];
+            for (let i = 0; i < 6; i++) {
+                const mistMat = new THREE.MeshBasicMaterial({
+                    color: 0xffe8cc,
+                    transparent: true,
+                    opacity: 0.18,
+                    depthWrite: false
+                });
+                const mist = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), mistMat);
+                mist.position.set(-2.5 + i * 0.95, -0.2 + (i % 2) * 0.35, -0.85);
+                mist.userData = { baseX: mist.position.x, speed: 0.35 + i * 0.1, phase: i };
+                dioramaGroup.add(mist);
+                mistPlanes.push(mist);
+            }
+
+            registerInteractable(paintingMasterGroup, 'painting');
+
+            // ==========================================
+            // 5. 從畫中延伸至客廳的 3D 古石橋 (The Surreal 3D Stone Bridge)
+            // ==========================================
+            const bridgeMasterGroup = new THREE.Group();
+            scene.add(bridgeMasterGroup);
+
+            // 定義古石橋從畫框內側一路延伸至左下角前景的控制路徑
+            // 起點位於畫中右下河谷，穿出畫框底部偏左處，斜向延伸至客廳左下前景
+            const bridgeStart = new THREE.Vector3(0.25, 2.15, -3.35); // 畫框內側引橋起點
+            const bridgePortal = new THREE.Vector3(-0.65, 2.02, -2.75); // 穿出畫框交界點
+            const bridgeEnd = new THREE.Vector3(-5.85, 0.92, 6.2);      // 客廳左下角前景終點
+
+            const bridgeCurve = new THREE.CatmullRomCurve3([
+                bridgeStart,
+                bridgePortal,
+                new THREE.Vector3(-2.1, 1.72, -0.1),
+                new THREE.Vector3(-3.8, 1.35, 2.8),
+                bridgeEnd
+            ]);
+
+            const bridgeStoneMat = new THREE.MeshStandardMaterial({
+                map: stoneWallTex,
+                roughness: 0.85,
+                bumpMap: stoneWallTex,
+                bumpScale: 0.04
+            });
+            const darkStoneMat = new THREE.MeshStandardMaterial({
+                map: stoneWallTex,
+                color: 0x736b5e,
+                roughness: 0.88
+            });
+            const roadCobbleMat = new THREE.MeshStandardMaterial({
+                map: cobbleRoadTex,
+                roughness: 0.8,
+                bumpMap: cobbleRoadTex,
+                bumpScale: 0.05
+            });
+
+            // 沿著橋樑路徑分段建構：鵝卵石橋面、兩側石砌護欄、底部拱門與落於木地板上的石橋墩
+            const totalSegments = 48;
+            const bridgeWidth = 1.48;
+            const parapetH = 0.24;
+            const parapetW = 0.15;
+
+            for (let i = 0; i < totalSegments; i++) {
+                const t1 = i / totalSegments;
+                const t2 = (i + 1) / totalSegments;
+                const tm = (t1 + t2) / 2;
+
+                const p1 = bridgeCurve.getPoint(t1);
+                const p2 = bridgeCurve.getPoint(t2);
+                const pm = bridgeCurve.getPoint(tm);
+                const segLen = p1.distanceTo(p2) * 1.06;
+
+                // 計算切線方向與水平法向量
+                const tangent = p2.clone().sub(p1).normalize();
+                const up = new THREE.Vector3(0, 1, 0);
+                const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
+
+                const segGroup = new THREE.Group();
+                segGroup.position.copy(pm);
+                // 讓分段朝向切線方向
+                const lookTarget = pm.clone().add(tangent);
+                segGroup.lookAt(lookTarget);
+
+                // 1. 鵝卵石橋面 (Cobblestone Deck)
+                const roadDeck = new THREE.Mesh(
+                    new THREE.BoxGeometry(bridgeWidth - parapetW * 1.4, 0.14, segLen),
+                    roadCobbleMat
+                );
+                roadDeck.castShadow = true;
+                roadDeck.receiveShadow = true;
+                segGroup.add(roadDeck);
+
+                // 2. 左右兩側人行步階與石砌矮牆護欄 (Stone Parapets)
+                [-1, 1].forEach(side => {
+                    // 內側微凸路緣石
+                    const curb = new THREE.Mesh(
+                        new THREE.BoxGeometry(0.18, 0.18, segLen),
+                        darkStoneMat
+                    );
+                    curb.position.set(side * (bridgeWidth / 2 - 0.16), 0.03, 0);
+                    segGroup.add(curb);
+
+                    // 外側石砌護欄牆与壓頂石
+                    const wall = new THREE.Mesh(
+                        new THREE.BoxGeometry(parapetW, parapetH, segLen),
+                        bridgeStoneMat
+                    );
+                    wall.position.set(side * (bridgeWidth / 2), parapetH / 2 + 0.02, 0);
+                    wall.castShadow = true;
+                    wall.receiveShadow = true;
+                    segGroup.add(wall);
+
+                    const coping = new THREE.Mesh(
+                        new THREE.BoxGeometry(parapetW + 0.05, 0.05, segLen + 0.01),
+                        darkStoneMat
+                    );
+                    coping.position.set(side * (bridgeWidth / 2), parapetH + 0.05, 0);
+                    segGroup.add(coping);
+                });
+
+                // 3. 橋面下方石拱結構 (Spandrel Wall & Arch Cutouts)
+                // 在幾個拱門區間之間創造真實的圓拱曲線高度
+                const archCycles = 4.2; // 4 個主拱門
+                const archPhase = (tm * archCycles) % 1;
+                const archCurveFactor = Math.sin(archPhase * Math.PI); // 0 在橋墩處, 1 在拱頂處
+                const minSpandrelH = 0.24;
+                const maxSpandrelH = pm.y; // 延伸到木地板
+                const currentArchThickness = minSpandrelH + Math.pow(1 - archCurveFactor, 2.2) * (maxSpandrelH - minSpandrelH);
+
+                const spandrelBody = new THREE.Mesh(
+                    new THREE.BoxGeometry(bridgeWidth - 0.04, currentArchThickness, segLen),
+                    bridgeStoneMat
+                );
+                spandrelBody.position.y = -currentArchThickness / 2;
+                spandrelBody.castShadow = true;
+                spandrelBody.receiveShadow = true;
+                segGroup.add(spandrelBody);
+
+                // 拱門內緣暗色石磚滾邊
+                if (archCurveFactor > 0.18) {
+                    const archRingBlock = new THREE.Mesh(
+                        new THREE.BoxGeometry(bridgeWidth + 0.02, 0.11, segLen),
+                        darkStoneMat
+                    );
+                    archRingBlock.position.y = -currentArchThickness;
+                    segGroup.add(archRingBlock);
+                }
+
+                bridgeMasterGroup.add(segGroup);
+            }
+
+            // 建立穩穩落在客廳木地板上的厚實階梯狀石橋墩與橋面方柱 + 復古街燈
+            const pierTValues = [0.21, 0.45, 0.69, 0.92];
+            const streetLampLights = [];
+            const lampBulbs = [];
+
+            pierTValues.forEach((t, idx) => {
+                const pt = bridgeCurve.getPoint(t);
+                const tan = bridgeCurve.getTangent(t).normalize();
+                const pierGroup = new THREE.Group();
+                pierGroup.position.set(pt.x, 0, pt.z);
+
+                // 只取水平方向的旋轉，確保橋墩垂直立在木地板上
+                const horizontalTarget = new THREE.Vector3(pt.x + tan.x, 0, pt.z + tan.z);
+                pierGroup.lookAt(horizontalTarget);
+
+                const pierHeight = pt.y;
+
+                // 主橋墩石柱
+                const mainPier = new THREE.Mesh(
+                    new THREE.BoxGeometry(bridgeWidth + 0.22, pierHeight, 0.68),
+                    bridgeStoneMat
+                );
+                mainPier.position.y = pierHeight / 2;
+                mainPier.castShadow = true;
+                mainPier.receiveShadow = true;
+                pierGroup.add(mainPier);
+
+                // 接觸木地板的寬大階梯底座 (Stepped Stone Plinth Base)
+                const baseStep1 = new THREE.Mesh(
+                    new THREE.BoxGeometry(bridgeWidth + 0.42, 0.18, 0.86),
+                    darkStoneMat
+                );
+                baseStep1.position.y = 0.09;
+                baseStep1.castShadow = true;
+                baseStep1.receiveShadow = true;
+
+                const baseStep2 = new THREE.Mesh(
+                    new THREE.BoxGeometry(bridgeWidth + 0.3, 0.32, 0.76),
+                    bridgeStoneMat
+                );
+                baseStep2.position.y = 0.16;
+                pierGroup.add(baseStep1, baseStep2);
+
+                // 橋面兩側凸出的石砌方柱與角錐帽蓋 (Pillars & Pyramidal Caps)
+                [-1, 1].forEach(side => {
+                    const pillar = new THREE.Mesh(
+                        new THREE.BoxGeometry(0.26, parapetH + 0.18, 0.28),
+                        bridgeStoneMat
+                    );
+                    pillar.position.set(side * (bridgeWidth / 2 + 0.04), pierHeight + parapetH / 2, 0);
+                    pillar.castShadow = true;
+                    pierGroup.add(pillar);
+
+                    // 錐形石雕柱頭
+                    const cap = new THREE.Mesh(
+                        new THREE.ConeGeometry(0.18, 0.14, 4),
+                        darkStoneMat
+                    );
+                    cap.rotation.y = Math.PI / 4;
+                    cap.position.set(side * (bridgeWidth / 2 + 0.04), pierHeight + parapetH + 0.15, 0);
+                    pierGroup.add(cap);
+
+                    // 在前三個橋墩柱頭上安裝古典鑄鐵黑街燈 (Vintage Black Street Lamps)
+                    if (idx < 3) {
+                        const lampGroup = new THREE.Group();
+                        lampGroup.position.set(side * (bridgeWidth / 2 + 0.04), pierHeight + parapetH + 0.2, 0);
+
+                        const ironMat = new THREE.MeshStandardMaterial({ color: 0x1c1d1f, metalness: 0.8, roughness: 0.3 });
+                        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.028, 0.52, 8), ironMat);
+                        post.position.y = 0.26;
+                        lampGroup.add(post);
+
+                        // 燈籠玻璃罩與發光燈芯
+                        const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffdf85 });
+                        const lanternGlass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.038, 0.13, 6), bulbMat);
+                        lanternGlass.position.y = 0.56;
+                        lampGroup.add(lanternGlass);
+                        lampBulbs.push(lanternGlass);
+
+                        const lanternRoof = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.07, 6), ironMat);
+                        lanternRoof.position.y = 0.65;
+                        lampGroup.add(lanternRoof);
+
+                        // 點光源 (PointLight)
+                        const pLight = new THREE.PointLight(0xffaa44, 0.65, 3.8);
+                        pLight.position.set(0, 0.58, 0);
+                        lampGroup.add(pLight);
+                        streetLampLights.push(pLight);
+
+                        pierGroup.add(lampGroup);
+                    }
+                });
+
+                bridgeMasterGroup.add(pierGroup);
+            });
+
+            // --- 橋上微型旅人模型 (Miniature Travelers Walking on Bridge) ---
+            const travelers = [];
+            const coatColors = [0x5c4033, 0x2f4f4f, 0x704214, 0x8b3a3a, 0x3b4954];
+
+            function createMiniatureTraveler(colorHex) {
+                const person = new THREE.Group();
+                const coatMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.8 });
+                const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8cbb1, roughness: 0.6 });
+
+                // 大衣身體
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.042, 0.16, 8), coatMat);
+                body.position.y = 0.08;
+                body.castShadow = true;
+                person.add(body);
+
+                // 頭部与禮帽
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 8), skinMat);
+                head.position.y = 0.185;
+                person.add(head);
+
+                const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.032, 0.025, 8), new THREE.MeshStandardMaterial({ color: 0x22201e }));
+                hat.position.y = 0.205;
+                person.add(hat);
+
+                return person;
+            }
+
+            const travelerConfigs = [
+                { t: 0.25, lane: -0.22, dir: -1, speed: 0.022 },
+                { t: 0.27, lane: 0.05, dir: -1, speed: 0.022 },
+                { t: 0.52, lane: 0.25, dir: 1, speed: 0.018 },
+                { t: 0.68, lane: -0.15, dir: -1, speed: 0.025 }
+            ];
+
+            travelerConfigs.forEach((cfg, i) => {
+                const mesh = createMiniatureTraveler(coatColors[i % coatColors.length]);
+                bridgeMasterGroup.add(mesh);
+                travelers.push({ mesh, ...cfg });
+            });
+
+            registerInteractable(bridgeMasterGroup, 'bridge');
+
+            // ==========================================
+            // 6. 現代客廳家具：實木茶几、茶具、畫冊與沙發
+            // ==========================================
+            
+            // --- (A) 實木復古茶几與桌面器物 (Rustic Wooden Coffee Table & Tea Set) ---
+            const tableGroup = new THREE.Group();
+            tableGroup.position.set(1.75, 0, 2.35);
+            scene.add(tableGroup);
+
+            const darkWoodMat = new THREE.MeshStandardMaterial({
+                map: woodFloorTex,
+                color: 0x82542d,
+                roughness: 0.5
+            });
+
+            // 厚實桌面
+            const tableTop = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.12, 1.5), darkWoodMat);
+            tableTop.position.y = 0.88;
+            tableTop.castShadow = true;
+            tableTop.receiveShadow = true;
+            tableGroup.add(tableTop);
+
+            // 茶几厚木底座箱體
+            const tableBase = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.82, 1.22), darkWoodMat);
+            tableBase.position.y = 0.41;
+            tableBase.castShadow = true;
+            tableBase.receiveShadow = true;
+            tableGroup.add(tableBase);
+
+            // 白色陶瓷茶壺 (White Ceramic Teapot with Wooden Handle)
+            const ceramicMat = new THREE.MeshStandardMaterial({ color: 0xeae6df, roughness: 0.25, metalness: 0.05 });
+            const teapotGroup = new THREE.Group();
+            teapotGroup.position.set(0.18, 0.94, -0.08);
+
+            const potBody = new THREE.Mesh(new THREE.SphereGeometry(0.19, 20, 16), ceramicMat);
+            potBody.scale.set(1, 0.88, 1);
+            potBody.position.y = 0.15;
+            potBody.castShadow = true;
+            teapotGroup.add(potBody);
+
+            const potLid = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.03, 16), ceramicMat);
+            potLid.position.y = 0.31;
+            const lidKnob = new THREE.Mesh(new THREE.SphereGeometry(0.025, 10, 10), ceramicMat);
+            lidKnob.position.y = 0.34;
+            teapotGroup.add(potLid, lidKnob);
+
+            // 壺嘴
+            const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.045, 0.16, 12), ceramicMat);
+            spout.position.set(-0.18, 0.18, 0);
+            spout.rotation.z = Math.PI / 3.2;
+            teapotGroup.add(spout);
+
+            // 提樑木柄
+            const handleArc = new THREE.Mesh(
+                new THREE.TorusGeometry(0.14, 0.015, 8, 20, Math.PI),
+                new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.6 })
+            );
+            handleArc.position.set(0, 0.28, 0);
+            teapotGroup.add(handleArc);
+            tableGroup.add(teapotGroup);
+
+            // 兩組茶杯與杯墊
+            function createTeacup(x, z) {
+                const cupGrp = new THREE.Group();
+                cupGrp.position.set(x, 0.94, z);
+                const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.018, 16), ceramicMat);
+                saucer.position.y = 0.01;
+                const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.052, 0.11, 16), ceramicMat);
+                cup.position.y = 0.065;
+                cup.castShadow = true;
+                cupGrp.add(saucer, cup);
+                return cupGrp;
+            }
+            tableGroup.add(createTeacup(-0.55, -0.22));
+            tableGroup.add(createTeacup(0.58, 0.12));
+
+            // 兩本堆疊的精裝藝術畫冊 (Stacked Hardcover Art Books)
+            const bookGroup = new THREE.Group();
+            bookGroup.position.set(-0.35, 0.94, 0.26);
+            bookGroup.rotation.y = 0.22;
+
+            const book1 = new THREE.Mesh(
+                new THREE.BoxGeometry(0.58, 0.065, 0.44),
+                new THREE.MeshStandardMaterial({ color: 0xdedad2, roughness: 0.5 })
+            );
+            book1.position.y = 0.032;
+            book1.castShadow = true;
+
+            const book2 = new THREE.Mesh(
+                new THREE.BoxGeometry(0.52, 0.055, 0.38),
+                new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.4 })
+            );
+            book2.position.set(0.02, 0.092, -0.01);
+            book2.rotation.y = -0.14;
+            book2.castShadow = true;
+
+            // 畫冊封面風景插畫貼片
+            const bookCoverArt = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.32, 0.22),
+                new THREE.MeshBasicMaterial({ color: 0x556352 })
+            );
+            bookCoverArt.rotation.x = -Math.PI / 2;
+            bookCoverArt.rotation.z = -0.14;
+            bookCoverArt.position.set(0.02, 0.121, -0.01);
+
+            bookGroup.add(book1, book2, bookCoverArt);
+            tableGroup.add(bookGroup);
+
+            registerInteractable(tableGroup, 'table');
+
+            // --- (B) 右側米色亞麻現代沙發與抱枕 (Beige Modern Sofa & Throw Pillows) ---
+            const sofaGroup = new THREE.Group();
+            sofaGroup.position.set(5.45, 0, 2.0);
+            sofaGroup.rotation.y = -Math.PI / 2 - 0.05;
+            scene.add(sofaGroup);
+
+            const fabricMat = new THREE.MeshStandardMaterial({
+                color: 0xd2c6b4,
+                roughness: 0.92
+            });
+            const pillowMat1 = new THREE.MeshStandardMaterial({ color: 0xc2b39f, roughness: 0.9 });
+            const pillowMat2 = new THREE.MeshStandardMaterial({ color: 0x8d7f71, roughness: 0.9 });
+
+            // 沙發底座與木腳
+            const sofaBase = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.36, 1.45), fabricMat);
+            sofaBase.position.y = 0.32;
+            sofaBase.castShadow = true;
+            sofaBase.receiveShadow = true;
+            sofaGroup.add(sofaBase);
+
+            // 沙發椅背
+            const sofaBack = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.95, 0.32), fabricMat);
+            sofaBack.position.set(0, 0.95, -0.58);
+            sofaBack.castShadow = true;
+            sofaGroup.add(sofaBack);
+
+            // 左右厚實扶手
+            [-1.95, 1.95].forEach(sx => {
+                const arm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.68, 1.48), fabricMat);
+                arm.position.set(sx, 0.68, 0);
+                arm.castShadow = true;
+                sofaGroup.add(arm);
+            });
+
+            // 三塊飽滿坐墊與背墊
+            [-1.18, 0, 1.18].forEach(cx => {
+                const seatCushion = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.24, 1.18), fabricMat);
+                seatCushion.position.set(cx, 0.6, 0.08);
+                seatCushion.castShadow = true;
+                seatCushion.receiveShadow = true;
+                sofaGroup.add(seatCushion);
+
+                const backCushion = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.68, 0.26), fabricMat);
+                backCushion.position.set(cx, 0.98, -0.32);
+                backCushion.rotation.x = 0.12;
+                backCushion.castShadow = true;
+                sofaGroup.add(backCushion);
+            });
+
+            // 裝飾抱枕
+            const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.16), pillowMat2);
+            p1.position.set(1.45, 0.95, -0.05);
+            p1.rotation.set(0.2, -0.4, 0.15);
+            p1.castShadow = true;
+
+            const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.48, 0.16), pillowMat1);
+            p2.position.set(1.15, 0.92, 0.08);
+            p2.rotation.set(0.15, -0.25, 0.08);
+            p2.castShadow = true;
+
+            const p3 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.16), pillowMat2);
+            p3.position.set(-1.35, 0.94, 0.02);
+            p3.rotation.set(0.18, 0.35, -0.1);
+            p3.castShadow = true;
+
+            sofaGroup.add(p1, p2, p3);
+            registerInteractable(sofaGroup, 'sofa');
+
+            // ==========================================
+            // 7. 穿界金塵粒子與熱茶蒸氣特效 (Portal Dust & Steam Particles)
+            // ==========================================
+            const particleCount = 140;
+            const particleGeo = new THREE.BufferGeometry();
+            const posArray = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount; i++) {
+                const t = Math.random();
+                const pt = bridgeCurve.getPoint(t);
+                posArray[i * 3] = pt.x + (Math.random() - 0.5) * 2.2;
+                posArray[i * 3 + 1] = pt.y + Math.random() * 1.6;
+                posArray[i * 3 + 2] = pt.z + (Math.random() - 0.5) * 1.8;
+            }
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+
+            const particleMat = new THREE.PointsMaterial({
+                color: 0xffd97d,
+                size: 0.065,
+                transparent: true,
+                opacity: 0.75,
+                blending: THREE.AdditiveBlending
+            });
+            const portalParticles = new THREE.Points(particleGeo, particleMat);
+            scene.add(portalParticles);
+
+            // ==========================================
+            // 8. 燈光系統與日夜光影模式 (Atmospheric Lighting)
+            // ==========================================
+            const ambientLight = new THREE.AmbientLight(0xffe8d6, 0.55);
+            scene.add(ambientLight);
+
+            const hemiLight = new THREE.HemisphereLight(0xffeedd, 0x4a3b2c, 0.45);
+            scene.add(hemiLight);
+
+            // 左側落地窗照入的自然主光 (Window Sunlight)
+            const windowSunLight = new THREE.DirectionalLight(0xfff1dc, 1.35);
+            windowSunLight.position.set(-11, 7.5, 4.5);
+            windowSunLight.castShadow = true;
+            windowSunLight.shadow.mapSize.width = 2048;
+            windowSunLight.shadow.mapSize.height = 2048;
+            windowSunLight.shadow.camera.near = 1;
+            windowSunLight.shadow.camera.far = 28;
+            windowSunLight.shadow.camera.left = -10;
+            windowSunLight.shadow.camera.right = 10;
+            windowSunLight.shadow.camera.top = 10;
+            windowSunLight.shadow.camera.bottom = -10;
+            windowSunLight.shadow.bias = -0.0005;
+            scene.add(windowSunLight);
+
+            // 畫中夕陽散發的暖金補光
+            const paintingGlowLight = new THREE.PointLight(0xff9d42, 1.1, 14);
+            paintingGlowLight.position.set(-0.2, 4.5, -1.8);
+            scene.add(paintingGlowLight);
+
+            // 切換光影模式設定
+            const lightModes = {
+                sunset: {
+                    bg: 0x1b1917,
+                    fog: 0x28231e,
+                    ambientHex: 0xffe8d6, ambientInt: 0.55,
+                    sunHex: 0xfff1dc, sunInt: 1.35,
+                    paintInt: 1.15,
+                    lampInt: 0.65
+                },
+                night: {
+                    bg: 0x090b10,
+                    fog: 0x0e1118,
+                    ambientHex: 0x455880, ambientInt: 0.28,
+                    sunHex: 0x6b8cff, sunInt: 0.35,
+                    paintInt: 0.85,
+                    lampInt: 1.45
+                },
+                morning: {
+                    bg: 0x26292e,
+                    fog: 0x333840,
+                    ambientHex: 0xe6f2ff, ambientInt: 0.75,
+                    sunHex: 0xffffff, sunInt: 1.55,
+                    paintInt: 0.65,
+                    lampInt: 0.2
+                }
+            };
+
+            function applyLightingMode(modeKey) {
+                const cfg = lightModes[modeKey];
+                if (!cfg) return;
+                scene.background.setHex(cfg.bg);
+                scene.fog.color.setHex(cfg.fog);
+                ambientLight.color.setHex(cfg.ambientHex);
+                ambientLight.intensity = cfg.ambientInt;
+                windowSunLight.color.setHex(cfg.sunHex);
+                windowSunLight.intensity = cfg.sunInt;
+                paintingGlowLight.intensity = cfg.paintInt;
+
+                const lampsEnabled = document.getElementById('toggle-lamps').checked;
+                streetLampLights.forEach(l => {
+                    l.intensity = lampsEnabled ? cfg.lampInt : 0;
+                });
+            }
+
+            // ==========================================
+            // 9. 互動導覽資料庫與 3D 熱點標記 (Hotspots & Raycasting)
+            // ==========================================
+            const hotspotData = {
+                bridge: {
+                    tag: '超現實核心結構',
+                    title: '破框而出的中世紀鵝卵石古橋',
+                    desc: '這座四拱石造高架引橋從畫作左下角無縫延伸至客廳前景。橋面以立體鵝卵石鋪成，兩側設有鑄鐵復古街燈與石雕方柱，底部階梯狀石橋墩穩穩坐落在溫潤的木地板上，微型旅人正漫步於虛實之間。',
+                    pos: new THREE.Vector3(-2.6, 2.25, 0.8)
+                },
+                painting: {
+                    tag: '巴洛克立體畫框',
+                    title: '畫中峽谷三拱橋與夕陽雲海',
+                    desc: '懸掛於洞石牆面上的巨幅巴洛克雕花金框油畫。畫框內部採用多層次 3D 微縮景深構築：遠方高聳險峻的群峰、山谷間流動的雲霧、蜿蜒金色溪流，以及與畫外古橋相連的峽谷三拱主橋。',
+                    pos: new THREE.Vector3(0.1, 4.9, -2.8)
+                },
+                table: {
+                    tag: '現代生活角落',
+                    title: '實木復古茶几與手沖白瓷茶具',
+                    desc: '鋪設於波斯復古雕花地毯上的厚實原木茶几。桌面上擺放著提樑白瓷茶壺、兩盞茶杯與兩本精裝風景藝術畫冊，靜謐的下午茶氛圍與一旁壯闊的奇幻古石橋形成迷人對比。',
+                    pos: new THREE.Vector3(1.75, 1.45, 2.35)
+                },
+                window: {
+                    tag: '室內外光影',
+                    title: '現代落地窗與城市綠意街景',
+                    desc: '左側大面積深色金屬框落地窗引入柔和的自然日光，在木地板與石橋拱門間投射出真實的立體陰影。窗外可見綠樹成蔭的街道與現代城市建築群。',
+                    pos: new THREE.Vector3(-7.0, 3.8, 1.5)
+                },
+                sofa: {
+                    tag: '居家陳設',
+                    title: '米色亞麻現代舒適沙發',
+                    desc: '位於客廳右側的現代簡約布藝沙發，搭配大地色系柔軟抱枕，提供觀賞這幅「活生生跨越畫框藝術品」的最佳座位視角。',
+                    pos: new THREE.Vector3(4.8, 1.45, 2.0)
+                }
+            };
+
+            const hotspotsLayer = document.getElementById('hotspots-layer');
+            const hotspotElements = [];
+
+            Object.keys(hotspotData).forEach((key, index) => {
+                const item = hotspotData[key];
+                const el = document.createElement('div');
+                el.className = 'hotspot-marker';
+                el.innerHTML = `${index + 1}`;
+                el.title = item.title;
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showInfoCard(key);
+                });
+                hotspotsLayer.appendChild(el);
+                hotspotElements.push({ key, el, pos: item.pos });
+            });
+
+            function showInfoCard(key) {
+                const data = hotspotData[key];
+                if (!data) return;
+                const card = document.getElementById('info-card');
+                document.getElementById('info-tag').textContent = data.tag;
+                document.getElementById('info-title').textContent = data.title;
+                document.getElementById('info-desc').textContent = data.desc;
+                card.classList.remove('translate-y-8', 'opacity-0', 'pointer-events-none');
+                card.classList.add('translate-y-0', 'opacity-100');
+            }
+
+            document.getElementById('close-info-btn').addEventListener('click', () => {
+                const card = document.getElementById('info-card');
+                card.classList.add('translate-y-8', 'opacity-0', 'pointer-events-none');
+                card.classList.remove('translate-y-0', 'opacity-100');
+            });
+
+            // 滑鼠點擊 3D 物件 Raycaster 偵測
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            let pointerDownPos = { x: 0, y: 0 };
+
+            renderer.domElement.addEventListener('pointerdown', (e) => {
+                pointerDownPos.x = e.clientX;
+                pointerDownPos.y = e.clientY;
+            });
+
+            renderer.domElement.addEventListener('pointerup', (e) => {
+                const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+                if (moveDist > 6) return; // 排除拖曳旋轉視角
+
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                const intersects = raycaster.intersectObjects(interactableObjects, false);
+                if (intersects.length > 0) {
+                    const key = intersects[0].object.userData.infoKey;
+                    if (key) showInfoCard(key);
+                }
+            });
+
+            // ==========================================
+            // 10. 鏡頭預設視角平滑運鏡與 UI 事件綁定
+            // ==========================================
+            const cameraPresets = {
+                photo: {
+                    pos: new THREE.Vector3(-1.3, 1.85, 11.2),
+                    target: new THREE.Vector3(-0.3, 1.6, 0.5),
+                    info: 'bridge'
+                },
+                bridge: {
+                    pos: new THREE.Vector3(-5.1, 1.75, 5.2),
+                    target: new THREE.Vector3(-0.5, 2.8, -2.5),
+                    info: 'bridge'
+                },
+                painting: {
+                    pos: new THREE.Vector3(-0.3, 4.1, 3.2),
+                    target: new THREE.Vector3(-0.2, 4.3, -3.2),
+                    info: 'painting'
+                },
+                room: {
+                    pos: new THREE.Vector3(6.8, 5.2, 10.8),
+                    target: new THREE.Vector3(-0.8, 2.0, 0.2),
+                    info: 'table'
+                }
+            };
+
+            let activeCameraTween = null;
+
+            function moveToCameraPreset(presetKey) {
+                const preset = cameraPresets[presetKey];
+                if (!preset) return;
+
+                activeCameraTween = {
+                    startPos: camera.position.clone(),
+                    endPos: preset.pos.clone(),
+                    startTarget: controls.target.clone(),
+                    endTarget: preset.target.clone(),
+                    progress: 0
+                };
+                showInfoCard(preset.info);
+            }
+
+            // 當使用者手動拖曳時取消自動運鏡
+            controls.addEventListener('start', () => {
+                activeCameraTween = null;
+            });
+
+            // 綁定視角按鈕
+            document.querySelectorAll('.cam-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    moveToCameraPreset(btn.dataset.cam);
+                });
+            });
+
+            // 綁定光影時辰按鈕
+            document.querySelectorAll('.light-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.light-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    applyLightingMode(btn.dataset.light);
+                });
+            });
+
+            // 綁定開關與滑桿
+            let isAnimEnabled = true;
+            document.getElementById('toggle-anim').addEventListener('change', (e) => {
+                isAnimEnabled = e.target.checked;
+            });
+
+            document.getElementById('toggle-particles').addEventListener('change', (e) => {
+                portalParticles.visible = e.target.checked;
+            });
+
+            document.getElementById('toggle-lamps').addEventListener('change', (e) => {
+                const on = e.target.checked;
+                streetLampLights.forEach(l => l.visible = on);
+                lampBulbs.forEach(b => b.material.color.setHex(on ? 0xffdf85 : 0x555555));
+            });
+
+            document.getElementById('toggle-hotspots').addEventListener('change', (e) => {
+                hotspotsLayer.style.display = e.target.checked ? 'block' : 'none';
+            });
+
+            document.getElementById('painting-depth-slider').addEventListener('input', (e) => {
+                const val = parseInt(e.target.value, 10);
+                document.getElementById('depth-val').textContent = `${val}%`;
+                dioramaGroup.scale.z = val / 100;
+            });
+
+            // 收合/展開控制面板
+            const controlPanel = document.getElementById('control-panel');
+            const toggleUiBtn = document.getElementById('toggle-ui-btn');
+            const toggleUiText = document.getElementById('toggle-ui-text');
+            let panelOpen = true;
+
+            toggleUiBtn.addEventListener('click', () => {
+                panelOpen = !panelOpen;
+                if (panelOpen) {
+                    controlPanel.classList.remove('translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                    toggleUiText.textContent = '收合控制面板';
+                } else {
+                    controlPanel.classList.add('translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                    toggleUiText.textContent = '展開控制面板';
+                }
+            });
+
+            // 視窗尺寸自適應
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // ==========================================
+            // 11. 動畫主迴圈 (Animation Loop)
+            // ==========================================
+            const clock = new THREE.Clock();
+
+            function animate() {
+                requestAnimationFrame(animate);
+
+                // 限制最大 delta 值，避免切換分頁或延遲時產生過大的時間步長導致曲線參數越界
+                const delta = Math.min(clock.getDelta(), 0.1);
+                const elapsed = clock.getElapsedTime();
+
+                // 1. 處理平滑鏡頭過渡
+                if (activeCameraTween) {
+                    activeCameraTween.progress += delta * 1.35;
+                    const t = Math.min(activeCameraTween.progress, 1);
+                    // Smoothstep 緩動曲線
+                    const ease = t * t * (3 - 2 * t);
+
+                    camera.position.lerpVectors(activeCameraTween.startPos, activeCameraTween.endPos, ease);
+                    controls.target.lerpVectors(activeCameraTween.startTarget, activeCameraTween.endTarget, ease);
+
+                    if (t >= 1) activeCameraTween = null;
+                }
+
+                controls.update();
+
+                // 2. 更新橋上旅人漫步動畫與山谷雲霧
+                if (isAnimEnabled) {
+                    travelers.forEach((tr, idx) => {
+                        tr.t += tr.dir * tr.speed * delta;
+                        if (tr.t >= 0.94) {
+                            tr.t = 0.94;
+                            tr.dir = -1;
+                        } else if (tr.t <= 0.08) {
+                            tr.t = 0.08;
+                            tr.dir = 1;
+                        }
+
+                        // 確保曲線參數嚴格限制於 [0, 1] 區間內
+                        const safeT = THREE.MathUtils.clamp(tr.t, 0.08, 0.94);
+                        const pt = bridgeCurve.getPoint(safeT);
+                        const tan = bridgeCurve.getTangent(safeT).normalize();
+                        const right = new THREE.Vector3().crossVectors(tan, new THREE.Vector3(0, 1, 0)).normalize();
+
+                        tr.mesh.position.copy(pt).addScaledVector(right, tr.lane);
+                        // 輕微步行上下律動
+                        tr.mesh.position.y += 0.07 + Math.abs(Math.sin(elapsed * 7 + idx)) * 0.015;
+
+                        const lookDir = tan.clone().multiplyScalar(tr.dir);
+                        tr.mesh.lookAt(tr.mesh.position.clone().add(lookDir));
+                    });
+
+                    // 畫中山谷雲霧緩慢漂浮
+                    mistPlanes.forEach(mist => {
+                        mist.position.x = mist.userData.baseX + Math.sin(elapsed * mist.userData.speed + mist.userData.phase) * 0.45;
+                    });
+                }
+
+                // 3. 更新穿界金塵粒子漂浮
+                if (portalParticles.visible) {
+                    const posAttr = portalParticles.geometry.attributes.position;
+                    for (let i = 0; i < particleCount; i++) {
+                        let py = posAttr.getY(i);
+                        py += delta * 0.18;
+                        if (py > 4.2) py = 1.0;
+                        posAttr.setY(i, py);
+                    }
+                    posAttr.needsUpdate = true;
+                }
+
+                // 4. 更新 3D 導覽熱點螢幕座標投影
+                hotspotElements.forEach(h => {
+                    const projected = h.pos.clone().project(camera);
+                    // 檢查是否在相機前方
+                    if (projected.z < 1) {
+                        const x = (projected.x * 0.5 + 0.5) * window.innerWidth;
+                        const y = (-(projected.y * 0.5) + 0.5) * window.innerHeight;
+                        h.el.style.transform = `translate(${x}px, ${y}px)`;
+                        h.el.style.left = '0px';
+                        h.el.style.top = '0px';
+                        h.el.style.display = 'flex';
+                    } else {
+                        h.el.style.display = 'none';
+                    }
+                });
+
+                renderer.render(scene, camera);
+            }
+
+            animate();
+        };
+    </script>
+</body>
+</html>
